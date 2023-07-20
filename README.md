@@ -42,12 +42,14 @@ This Project does demonstrate that using Forth as a programming language for an 
 
 Testing The System
 
-A separate computer with an RTL-SRD dongle attached was used to test the Mini-WSPR system. This second system in the next room used the WSJT-X software to decode any received RF. With the second system the WSPR frequencies and symbol coding were validated. The small oscilloscope was used to check the rough frequency output from the SI5351. Delay loops were adjusted to have 162 symbols of 683 ms followed by a 9400 ms delay time to make a 120 second total transmission time. During a band change the delay time needs to adjusted to take into account the time to redo all the parameter calculations (~70 ms ). The first demo system is shown in the photo below where the clk0 output of the 5351 is connected to a 20M LPF and an EFHW wire antenna. The laptop computer is used as an ASCII terminal to talk to the ATmega328P via the UNO’s USB to TTL ASCII connection.A separate computer with an RTL-SRD dongle attached was used to test the Mini-WSPR system. This second system in the next room used the WSJT-X software to decode any received RF. With the second system the WSPR frequencies and symbol coding were validated. The small oscilloscope was used to check the rough frequency output from the SI5351. Delay loops were adjusted to have 162 symbols of 683 ms followed by a 9400 ms delay time to make a 120 second total transmission time. During a band change the delay time needs to adjusted to take into account the time to redo all the parameter calculations (~70 ms ). The first demo system is shown in the photo below where the clk0 output of the 5351 is connected to a 20M LPF and an EFHW wire antenna. The laptop computer is used as an ASCII terminal to talk to the ATmega328P via the UNO’s USB to TTL ASCII connection.
+A separate computer with an RTL-SRD dongle attached was used to test the Mini-WSPR system. This second system in the next room used the WSJT-X software to decode any received RF. With the second system the WSPR frequencies and symbol coding were validated. The small oscilloscope was used to check the rough frequency output from the SI5351. Delay loops were adjusted to have 162 symbols of 683 ms followed by a 9400 ms delay time to make a 120 second total transmission time. During a band change the delay time needs to adjusted to take into account the time to redo all the parameter calculations (~70 ms ). The first demo system is shown in the photo below where the clk0 output of the 5351 is connected to a 20M LPF and an EFHW wire antenna. The laptop computer is used as an ASCII terminal to talk to the ATmega328P via the UNO’s USB to TTL ASCII connection.
 
  
+![image](https://github.com/rgeorge-228/Mini-WSPR/assets/51888591/3537c8dc-2a6c-4348-9036-64a7094e1683)
 
 
 
+![Screenshot 2023-06-01 093527](https://github.com/rgeorge-228/Mini-WSPR/assets/51888591/b126f7f4-d329-4149-94be-d63cc17b51d2)
 
 
 
