@@ -1,0 +1,1269 @@
+\ ------------- Add new constants and TWI Words 10/30/22 RDG ----------------
+\ ------------- Version 6.12	May 2023	R D George   ----------------
+\ ------------- No Real Time Clock -- Delay Loops for timing ----------------
+hex
+\ Delay for approximately 1 milisecond
+: MS ( n -- ) FOR AFT $1B4 FOR NEXT THEN NEXT ;
+\ Delay for approximately 500 microseconds
+: 500micro ( -- ) $DD for next ;
+\ Basic Words for I2C communication with Atmega 328P
+b8 constant TWBR			\ Bit Rate Register
+b9 constant TWSR			\ Status Register
+ba constant TWAR			\ Not used
+bb constant TWDR			\ Data Register Read-Write
+bc constant TWCR			\ Control Register
+80 constant TWINT			\ Bit 7 set
+40 constant TWEA			\ Bit 6 set
+20 constant TWSTA			\ Bit 5 set
+10 constant TWSTO			\ Bit 4 set
+04 constant TWEN			\ Bit 2 set
+\ 48 constant TWI_SPEED			\ Bit Rate for 100KHz clock 16 MHz CPU
+0C constant TWI_SPEED			\ Bit Rate for 400KHz clock 16 MHz CPU
+: twi_baud TWBR	c! ;			\ Set Bit Rate Register
+: twi_open TWI_SPEED twi_baud ;		\ Use twi-Open to set up I2C bus
+: twi_wait begin TWCR c@ TWINT and until ;	\ Wait for TWCR bit TWINT to be set
+: twi_go TWINT TWEN or or TWCR c! ;	\ 00 or 80 or 04 = 84 to TWCR
+: twi_start TWSTA twi_go twi_wait ;	\ 20 or 80 or 04 = A4 to TWCR
+: twi_stop TWSTO twi_go ;		\ 10 or 80 or 04 = 94 to TWCR
+					\ ( Read )       = C4 to TWCR
+: twi_tx ( byte - )			\ byte to TWDR, 00 or 80 or 04 = 84 to TWCR 
+	TWDR c! 0 twi_go twi_wait	\ generalized byte transmitt by I2C 
+;
+\ --------------------------------------------------------------------
+\ twi_init I2C Initialize function for SI5351A
+: twi_i5351 ( -- )
+	twi_open			\ set baud rate
+	twi_start			\ send start command
+	C0 twi_tx			\ 5351 slave add + W bit = 0
+	TWSR c@ cr .			\ print status register
+	twi_stop
+;
+\ Write byte to one register of SI5351A
+: twi_w5351	( b,reg -- )		\ write register with byte
+	twi_start			\ start on I2C buss
+	C0 twi_tx			\ 5351 slave add + W bit = 0
+	twi_tx				\ Reg address byte
+	twi_tx				\ send data byte
+	twi_wait			\ wait for register write
+\	twi_stop			\ I2C buss stop
+;
+\ read some test data from SI5351
+: twi_r5351	( n -- )		\ read n bytes starting at zero
+	twi_start			\ start on I2C bus
+	C0 twi_tx			\ 5351 slave add + W bit = 0
+	00 twi_tx			\ to set address coun20
+	twi_start			\ send second I2C start
+	C1 twi_tx			\ 5351 slave add + R bit = 1
+	dup for aft dup 1 -		\ count - 1 
+	c4 twcr c!			\ respond with TWINT, TWAE, TWEN set
+	twi_wait TWDR c@		\ wait then pop data register
+	swap r@ - cr . . 		\ print count and value
+	then next			\ and count for n times
+	drop				\ clean stack
+\	twi_stop			\ send I2C bus stop
+;
+\ read a register on the SI5351A
+: twi_reg@	( n -- c )		\ read the byte contents of a register n
+	twi_start			\ start on I2C buss
+	C0 twi_tx			\ 5351 slave add + W bit = 0
+	twi_tx				\ to set address from n
+	twi_start			\ send second I2C start
+	C1 twi_tx			\ 5351 slave add + R bit = 1
+	C4 twcr c!			\ TWINT TWEN or TWEA or = C4
+	twi_wait			\ wait on read request
+	twdr c@				\ pop byte from twi data register
+\	twi_stop			\ send stop to twi buss
+;
+\ ------------------------------------------------------------------------------
+\ Save the context stored in tmp memory to Flash so Words
+\ will be saved on reboot	R D George 8/2/22
+: Save_State ( -- )
+	100 Erase			\ Erase Flash starting at 100
+	100 100 Write			\ Write RAM 100-17F to Flash 
+	180 Erase			\ Erase Flash starting at 180
+	180 180 Write			\ Write RAM 180-1FF to Flash
+;
+\ -----------------------------------------------------------------------------
+: bin		( -- )			\ set base to 2 Binary
+	2 base !
+;
+130 constant mtmp			\ top math temp storage pointer
+150 constant dr				\ top temp data variable pointer
+\ Top of RAM is 140 at start of code loading
+	10 allot			\ 16 bytes for temp data
+	150 dp !			\ change dp RAM address to 150
+\ Math routines use qddress 120 - 12f for temp data storage
+\ SI5351A code uses address 140 - 14f for temp data variables
+\ save space for SI5351 Math operations. Use constant dr as pointer
+\ 		R D George 12/24/22
+\ Variable names and storage used in SI5351A RF Synthesizer
+\ ms0_p2 = 0	(reg=E)	ms0_p3 = 1	(reg=F)
+	variable aa			\ FMD ratio 28 (x01C) address 150
+	variable dd			\ OMD ratio
+	variable bb			\ b for b/c
+	2 allot				\ double word			
+	variable cc			\ c for b/c
+	2 allot				\ double word
+	variable ee			\ e for e/f ratio
+	2 allot				\ double word
+	variable ff			\ f for ratio e/f
+	2 allot				\ double word
+	variable fout			\ output frequency
+	2 allot				\ double word
+	variable pll			\ 700 MHz best results
+	2 allot				\ 2 more bytes for 2 words
+	variable tmp			\ tmporary 32 bit variable
+	2 allot				\ 2 more bytes for 2 words
+	variable m25			\ 25MHz Clock
+	2 allot				\ 2 more bytes for 2 words
+	variable ms0_p1			\ MS0_P1 (128*d -512)
+	2 allot				\ 2 more bytes for 2 words
+	variable ms0_p2			\ MS0_P2
+	2 allot				\ 2 more bytes for 2 words
+	variable ms0_p3			\ MS0_P3
+	2 allot				\ 2 more bytes for 2 words
+	variable msna_p1		\ MSNA_P1 (128*a + 128*b/c -512)
+	2 allot				\ 2 more bytes for 2 words
+	variable msna_p2		\ MSNA_P2 (128*b - c*(128*b/c))
+	2 allot				\ 2 more bytes for 2 words
+	variable msna_p3		\ MSNA_P3 = c
+	2 allot				\ 2 more bytes for 2 words
+	variable reg_x			\ 16 8 bit registers (2)
+	E allot				\ 16 bytes total     (14) *.12
+	variable del_cnt		\ one word for MS delay count
+FLUSH
+\ ------------------------------------------------------------------------
+\ Section of words for multi word math operations December 2022
+\ Ingeter math		R. D. George
+\ ------------------------------------------------------------------------
+\ Index retrive for double array in RAM memory count, address
+: i>		( count,add -- d )	\ retrive nth double
+	swap 4 * + dup @ 		\ low word
+	swap 2 + @			\ high word
+;
+\ Index save for double array in RAM memory count, address, d
+: >i		( d,count,add -- )	\ store double add + nth double
+	swap 4 * 2 + + dup >r !		\ high word
+	r> 2 - !			\ low word
+;
+\ Logical shifts with zero fill
+: 2/0>		( n -- n/2 )		\ logical right shift with 0 fill
+	2/ 7fff and			\ divide by 2 and zero MSB
+;
+: 2*0>		( n -- n*2 )		\ logical left shift with 0 fill
+	2 um* drop			\ times 2 for double drop high
+;
+: lshift	( n,c -- n*c*2 )	\ left shift word by c
+	for aft 2*0> then next		\ shift c times
+;
+: rshift	( n,c -- n/c*2 )	\ right shift word by c
+	for aft  2/0> then next		\ shift c times
+;
+\ double word shifts with carry
+: dr>		( n,n -- n/2,n/2 )	\ logical 2 word right shift 0 fill 
+	swap 2/0> swap dup		\ swap high word 2/ low word
+	1 and if			\ check high word LSB zero skip else
+		swap 8000 or swap	\ or in MSB in low word
+	      then			\ then swap back
+	2/0>				\ else high word 2/	
+;
+: dl>		( n,n -- n*2,n*2 )	\ logical left shift with 0 fill
+	swap dup 8000 and		\ check MSB of low word
+	if				\ if zero skip tro else
+	  swap 2*0> 1 + else		\ otherwise multiply by 2 and add 1
+			swap 2*0>	\ else multiply by 2
+	then				\ MSB is zero
+	swap 2*0> swap			\ multiply high by 2 swap back
+;
+: drshift	( d,c -- d/2*c )	\ double right shift by count
+	for aft dr> then next		\ loop for count
+;
+: dlshift	( d,c -- d*2*c )	\ Double left shift by count
+	for aft dl> then next		\ loop for count
+;
+\ Quad word right shift with carry checking
+: qr>		( n,n,n,n ---- n/2,n/2,n/2,n/2 )
+	swap dup 1 and			\ check H1 for carry right
+	if				\ true do double shifts and
+	  swap dr> >r >r		\ add make the MSB of L2 a 1
+	  dr> 8000 or			\ after L1, L2 right shift
+	else				\ false
+	  swap dr> >r >r dr>		\ two double word right shifts
+	then				\ continue
+	  r> r>				\ restore stack
+;
+\ Quad word left shift with carry checking
+: ql>		( n,n,n,n -- n*2,n*2,n*2,n*2 )
+	2 pick 8000 and			\ check L2 for carry left
+	if				\ true do double left shifts and
+	  dl> swap 1 or swap		\ add in carry H1 to L2
+	  >r >r dl>			\ save double and left next double
+	else				\ flase just do both left shifts
+	  dl> >r >r dl>			\ two double word left shifts
+	then				\ continue
+	r> r>				\ restore stack
+;
+: qrshift	( d,d,c -- d,d/2*c )	\ Quad right shift by count
+	for aft qr> then next		\ repeat Quad right shift c times
+;
+: qlshift	( d,d,c -- d,d*2*c )	\ Quad left shift
+	for aft ql> then next		\ repeat Quad left shift c times
+;
+\ Double swap
+: dswap		( d1,d2 -- d2,d1 )	\ swap dpoubles on stack
+	>r >r	( h1,l1 )		\ h2 l2 on return stack
+	r> rot	( h1,l2,l1 )		\ add l2 back and rot
+	rot r>	( l2,l1,h1,h2 )		\ rotate and add back h2
+	rot rot	( l2,h2,l1,h1 )		\ rotate twice to finish
+;
+\ ?drop changed 4/8/23 R D George -- Fixed error on compair
+: ?drop		( n -- drop=0)		\ drop top of stack if zero
+	dup 0 = if drop then		\ zero drop
+;
+: ndrop  	( n..n -- ) 		\ clears stack of all items
+ 	depth
+   	  for aft			\ loop for depth
+    	    drop 			\ remove item
+	  then next			\ loop
+;
+: popr  	( --  )			\ try to pop return stack
+	>r dup r> cr .			\ get, copy, replace, print
+;
+\ All multi word math routines use temporary storage at 120-12F and 140-14F
+\ address in RAM. The temp doubles and quads are saved in reverse order.
+\ 
+\ Multiply up to a double by single 32 for 48 bit result 3 words low2, low1, high
+\ single by single = 32 bit result. double by single = 48 bit result
+\ R D George				12-11-2022
+: xmul	( d,n -- t48 )			\ double * single = triple word result
+	dup >r				\ save single multiplier
+	um* rot r> um*			\ single times high then times low
+	swap >r 0			\ get high 16 bits save low word
+	d+ r> 				\ now add two doubles for results
+	rot rot				\ plus second low byte 48 bit result
+;
+: 6sav		( n1,n2,n3,n4,n5,n6 -- ) \ save 6 words 12 bytes reverse order
+	depth 6 = if			\ must be 6 on the stack
+		6 for aft dr r@ 1 + 2 * - !
+		then next		\ reverse order of stack high, low
+		  else ." Must be 6 words on stack"
+		then			\ end of if
+;
+: 8sav		( n1,n2,n3,n4,n5,n6,n7,n8 -- )	\ save 8 words 16 bytes
+	depth 8 = if			\ must be 8 words on the stack
+		8 for aft mtmp r@ 1 + 2 * - !
+		then next		\ reverse order of stack high, low
+		  else ." Must be 8 words on stack"
+		then			\ end of if
+;
+: q+		( q1,q1,q1,q1 q2,q2,q2,q2 -- q3,q3,q3,q3 )
+					\ quad1 + quad2 = quad3
+		depth 8 = if		\ quad word add must be 8 on stack
+		  8sav			\ empty stack to temp RAM
+		  mtmp 2 - @ 0		\ low words make a double
+		  mtmp A - @ 0 d+	\ use double add to check for carry
+		  mtmp 4 - @ + 0	\ add any carry plus next word & double
+		  mtmp C - @ 0 d+	\ next word make double and add
+		  mtmp 6 - @ + 0	\ add any carry plus next word & double
+		  mtmp E - @ 0 d+	\ next word make double and add
+		  mtmp 8 - @ + 0	\ add any carry plus next word & double
+		  mtmp 10 - @ 0 d+	\ add last set of words
+		  drop			\ drop last carry or zero word
+			else ." Must be 8 words for Q+"
+		  then			\ end of if
+;
+: q-		( q1,q1,q1,q1 q2,q2,q2,q2 -- q3,q3,q3,q3 )
+\ Reworked logic for signed numbers R. D. George May 15 2023
+					\ quad1 - quad2 = quad3
+	depth 8 = if			\ quad word must be 8 on stack
+	  8sav				\ empty stack to temp RAM backwards
+	  mtmp 2 - @ 0			\ low words make a double
+	  mtmp A - @ 0 dnegate d+	\ 2's complement add for subtract
+	  mtmp 4 - @ + 0		\ add in any -1 carry make double
+	  mtmp C - @ 0 dnegate d+	\ next word to subtract as double
+ 	  mtmp 6 - @ + 0 		\ add in any -1 carry make double
+	  mtmp E - @ 0 dnegate d+	\ next word make double add double carry
+	  mtmp 8 - @ + 0	 	\ add in any -1 carry make double
+	  mtmp 10 - @ 0 dnegate d+	\ next word make double add double carry
+	  drop 2dup + 0< if		\ drop last carry check for last 0
+		drop FFFF		\ drop zero add -1
+		else			\ else do nothing
+		then			\ end of if
+	else ." Must be 8 words for Q-"
+	then				\ end of if (False)
+;
+\ Multiply double by double for quad result. Uses xmul
+: dd*		( d,d -- q d*d )	\ double by double for quad result
+	0 0 6sav			\ add two o's and save 12 bytes
+	dr 2 - @ dr 4 - @		\ d2 to stack then d1 low word
+	dr 6 - @ xmul 0			\ multiply and make quad word
+	dr 2 - @ dr 4 - @		\ d2 to stack d1 high word
+	dr 8 - @ xmul 0			\ multiply and make quad word
+	10 qlshift 			\ left shift 16
+	q+				\ add two partial results
+;
+\ Unsigned double compair flag=TRUE if d1<d2, FALSE if d1>d2
+\ changes logic and sence of compair 4/6/23
+: du< 		( d1,d2 -- flag)	\ unsigned double compair
+	rot swap 2dup >r >r u< 		\ check high words for less than
+		if			\ true we are done
+		  r> r> 2drop 2drop	\ clean up stack
+		  ffff			\ set flag to true
+		else 			\ not less than - are they equal?
+		  r> r> =		\ high words equal then check low 
+		    if			\ if for high1 = high2, yes then
+		      u<		\ is low1 less than low2?
+			if		\ yes then 	
+			  ffff		\ set true flag
+			else		\ no
+			  0000		\ set flase flag
+			then		\ end if
+		    else		\ no then
+		      2drop		\ clear stack
+		      0000		\ set the flase flag
+		    then		\ end if    
+		then			\ end of if
+\	invert				\ for old convention
+;
+\ Double word Logical AND 32 bit compair
+: dd&		( d1,d2 -- d )		\ AND d1 with d2 result is d
+	rot and swap rot and swap	\ 32 bit AND
+;
+\ Divide Loop - after scaling dividen to one hex digit greater 
+\ then subtract the divisor n times to get that hex digit. 
+\ R D George 12-8-22
+: divloop ( d-div,d-dvr -- c )		\ divide loop subtract for count
+	0 >r				\ count to zero save on stack
+	begin r> 1 + >r			\ count saved on return stack
+	2dup >r >r  d-			\ save divisor then subtract
+	dup 0< 1 + while		\ test for negative high word
+	r> r>  repeat			\ restore divisor and loop
+	r> r> d+ drop drop		\ remove remainder and divisor
+	r> 1- 				\ clean up and count - 1
+;		
+\ Shift dividen to one hex digit greater that divisor for first divide test
+\ Updated with new du< logic had to insert Invert for logic shift 4/7/23
+: dscale 	( -- count)		\ scale dividen
+	0 begin 4 + >r			\ count by 4's save to return stack 
+	  dr 2 - @ dr 4 - @		\ retrive dividen from RAM
+	  dr 6 - @ dr 8 - @		\ 4 word dividen
+	  2dup + if			\ high words both zero?
+		 else			\ 0 means yes
+		 r> 4 - >r		\ decrement count
+		 then			\ end of if
+	  r@ qrshift			\ shift quad word right
+	  + while			\ check high words zero after shift
+	    ndrop			\ clear stack
+	    r>				\ restore count on stack
+	  repeat			\ repeat till high words zero
+	2dup				\ dup shifted dividen
+	dr A - @ dr C - @ 		\ get divisor compair ****
+	du< invert			\ want true (FFFF) if dividen greater
+	if				\ compair dividen to divisor
+	  0 begin 4 + >r		\ dividen greater count by 4 again
+	    4 drshift 2dup		\ right shift double by 4
+	    dr A - @ dr C - @	 	\ get divisor ****
+	    du< invert			\ want true (FFFF) if dividen greater 
+	    while			\ divisor less than shifted dividen
+	      r>			\ restore count and continue
+	    repeat			\ continue begin loop
+	then				\ end of IF
+	ndrop				\ clean up stack
+	r> 4 - r> +			\ return sum of both counts
+;
+: dhex		( c -- n,c )		\ find one hex digit for quotient
+	>r				\ save shift count
+	dr 2 - @ dr 4 - @		\ retrive dividen
+	dr 6 - @ dr 8 - @		\ 4 word dividen
+	r@ qrshift			\ right shift Dividen by total count
+	?drop ?drop			\ clear zeros
+	dr A - @ dr C - @		\ get divisor
+	divloop				\ hex digit for the quotient
+	dup 0 r@ dlshift		\ dup, make double and left shift
+	dr 10 - @ dr E - @		\ get quoteint temp low,high
+	d+ dr E - ! dr 10 - !		\ add new result and store
+	r>				\ return digit and shift count
+;
+\ Main divide logic - divide Quad (64bit) by Double (32) for Double (32bit) Result
+\ and Double (32bit) Remainder		R. D. George	Dec 2022
+\ Updated logic to check if Dividend is less than Divisor at start 4/8/23
+: 4div  	( d,d-div, d-dvr -- d quo,d-rem)
+	0 dr E - ! 0 dr 10 - !		\ storage for quotient, set to 0 0
+	0 dr 2 - ! 0 dr 4 - !		\ storage for remainder, set to 0 0
+ 	6sav   				\ save 4 DIVIDEN 2 DVRISOR
+	dr 2 - @ dr 4 - @		\ get four word
+	dr 6 - @ dr 8 - @		\ dividen?
+	dr A - @ dr C - @		\ get divisor from saved location
+	0 0 q- ?drop ?drop 		\ make dividen quad and subtract then double
+	FFFF = invert			\ check for less than zero make it False if so
+      IF				\ quad subtraction ok no negative?
+      ndrop				\ clear stack   
+      BEGIN				\ Main Loop (Divined GT Divisor)
+	dscale 				\ scale dividen by count and save
+	dhex				\ hex digit add to quotient and shift count
+	>r >r				\ count then digit to return stack
+	dr 2 - @ dr 4 - @		\ get four word
+	dr 6 - @ dr 8 - @		\ dividen
+	dr A - @ dr C - @		\ get divisor
+	r> xmul 0			\ hex digit time divisor add 0 for quad
+	r> qlshift q-			\ shift then subtract for remainder
+	dr 8 - ! dr 6 - !		\ store new dividen in temp storage
+	2dup dr 4 - ! dr 2 - !		\ keep remainder on stack for test
+	dr A - @ dr C - @		\ get divisor ****
+	du< invert			\ compair remainder to divisor
+      WHILE				\ test for zero else repeat main loop	
+      REPEAT				\ loop
+      ELSE 				\ no division is possible
+	ndrop				\ clear stack for zero results
+      THEN 				\ end if
+	dr 10 - @ dr E - @		\ Quotient
+	dr 2 - @  dr 4 - @		\ Remainder
+;
+\ Resize words on stack for max possible division 4 by 2 REVIEW 12/23/22
+: todiv		( xn..6n -- quo,rem )		\ any word length to Quad by Double
+	depth >r				\ how many words on stack? save count
+		\ 2=single by single, 3=double by single, 4=quad by double
+		\ 5=quad by douuble, 6=quad by double. 1=error
+	r@ 2 < if ." Must be at least 2 words"  
+	  else r@ 3 < if ." 2 words"
+			 /mod swap 7fff > if 1 + then
+					\ if mod > 1/2 round up 1 single by single
+	    else r@ 4 < if ." 3 words"
+			   um/mod swap 7fff > if 1 + then
+			  		\ if mod > 1/2 round up 1 double by single
+	      else r@ 5 < if ." 4 words"
+			    0 rot rot 0 rot rot
+			    		\ add two zeros to first double quad by double
+			    4div 
+	        else r@ 6 < if ." 5 words"
+			      		\ add zero to dividen quad by double
+			       0 rot rot
+			       4div
+	          else r@ 7 < if ." 6 words"
+					\ quad word divide by double 
+				  4div
+		    else ." Error Divide"
+	then then then then then then
+	r> drop				\ clean up stack
+;
+\ =====================================================================
+\ Calculate SI5351A parms for output frequency in Hz and clock frequency
+\ R D George	12/23/2022
+\ Updated to simplify calculations and use a base frenquency with integer
+\ count of frenquency steps (i.e. 1.464 Hz for WSPR)
+\ R D George	03/26/2023in
+\ =====================================================================
+: init		( -- )			\ initialize calculations for SI5351
+	0 aa ! 0 dd ! 			\ single words a & d
+	0 0 0 bb >i			\ c and b double words
+	0 0 0 cc >i			\ zero out RAM storage
+	0 0 0 ee >i			\ zero e register
+	1 0 0 ff >i			\ set f to 1 (so no divide by zero)
+ 	14F0 D7 0 fout >i		\ default frequency output 14.095600
+	7840 17d  0 m25 >i		\ 25 MHz Default Xatl Ref frequency
+	2474 del_cnt !			\ delay count for ~ 9 seconds
+	ms0_p1 14 for aft dup 0 swap	\ zero rest of variables
+		! 2 + then next		\ next word
+	ndrop				\ clean up stack
+;
+\ Simple add and store using tmp variable
+: tmp+=		( d -- tmp )		\ add double to tmp and store
+	0 tmp i> d+			\ add to sum of double word
+	0 tmp >i			\ save partial sum
+;
+\ Read numbers from Terminal Input Buffer at RAM address 700 and convert
+\ to hex double word at tmp
+: dread		( --- tmp )		\ convert 8 digit decimal to hex
+	0 0 0 tmp >i			\ zero 32 bit tmp location *
+	0 f for aft dup 700 + c@	\ get ASCII digits to stack
+	    swap			\ keep loop count on top
+	1 + then next			\ chars on stack reverse order
+	drop				\ drop count
+	f for aft ?drop then next	\ remove zero words
+	depth   			\ how many on stack ?
+	>r 0				\ save count of digits & loop count
+	begin				\ loop through ASCII digits
+	  r> 1 - dup >r 0< invert	\ count down to -1
+	while				\ while count posative
+	  1 +				\ position count on top
+	  dup 1 = if	." Ones"	\ is it ones position
+		swap			\ flip count and ASCII digit
+		30 - 1 um*		\ convert digit * position
+		tmp+=			\ add to partial sum
+	    else dup 2 = if  ." Tens"	\ is it 10's position
+		swap			\ flip count and ASCII digit
+		30 - A um*		\ digit * 10
+		tmp+=			\ add to partial sum
+	    else dup 3 = if	 ." Hundreds"	\ is it 100's position
+		swap			\ flip count and ASCII digit
+		30 - 64 um*		\ digit * 100
+		tmp+=			\ add to partial sum
+	    else dup 4 = if	 ." Thousands"	\ is it 1,000's position
+		swap			\ flip count and ASCII digit
+		30 - 3e8 um*		\ digit * 1000
+		tmp+=			\ add to partial sum
+	    else dup 5 = if	 ." 10 K"	\ is it 10,000's position
+		swap			\ flip count and ASCII digit
+		30 - 2710 um*		\ digit * 10000
+		tmp+=			\ add to partial sum
+	    else dup 6 = if	." 100 K"	\ is it 100,000's position
+		swap			\ flip count and ASCII digit
+		30 - 86a0 0001 		\ digit * 100000
+		rot xmul ?drop		\ double * single drop third word
+		tmp+=			\ add to partial sum
+	    else dup 7 = if  ." Millions"	\ is it 1,000,000's position
+		swap			\ flip count and ASCII digit
+		30 - 4240 000f 		\ digit * 1000000
+		rot xmul ?drop		\ double * single drop third word
+		tmp+=			\ add to partial sum
+	    else dup 8 = if	." 10 MM"	\ is it 10,000,000's position
+		swap			\ flip count and ASCII digit
+		30 - 9680 0098 		\ digit * 1000000
+		rot xmul ?drop		\ double * single drop third word
+		tmp+=			\ add to partial sum
+	  then then then then then then then then
+	repeat				\ only convert to 10's of millions
+	r>				\ clear return stack					
+;					
+: feq>		( -- tib )		\ input output frequency in Hz
+	." Input frequency in HZ ie. 14074000 then press Enter" cr
+	0 10 for aft dup 700 + 		\ clear 16 bytes at RAM 700
+		0 swap c! 1 +		\ in the terminal input buffer
+		then next		\ starting at RAM 700
+	     drop			\ clear count
+	query cr			\ wait for character input
+	dread				\ convert to double at tmp
+	tmp fout 4 cmove		\ move 4 bytes to fout
+	ndrop ndrop			\ must do a ndrop after call to dread
+;
+: clk>		( -- tib )		\ input clock frequency in Hz
+	." Input the 5351 clock in HZ ie. 25004500 then press Enter" cr
+	0 10 for aft dup 700 + 		\ clear 16 bytes at RAM 700
+		0 swap c! 1 +		\ in the terminal input buffer
+		then next		\ starting at RAM 700
+	     drop			\ clear count
+	query cr			\ wait for character input
+	dread				\ convert to double at tmp
+	tmp m25 4 cmove			\ move 4 bytes to m25 - clock
+	ndrop ndrop			\ must do a ndrop after call to dread
+;
+\ Print parameters for SI5351 to check calculations
+: parms		( -- emit fout,clk,a,b,c,d,e,f)
+	cr ." Fout " 0 fout i> . space .
+	cr ."  clk " 0 m25 i> . space .
+	cr ."    a " aa @ . space
+	cr ."    b " 0 bb i> . space .
+	cr ."    c " 0 cc i> . space .
+	cr ."    d " dd @ . space
+	cr ."    e " 0 ee i> . space .
+	cr ."    f " 0 ff i> . space .
+	cr
+;
+\ ******************************************************************************	
+\ Notes:(in Decimal) Fout=clk*(a+b/c)/(d+e/f) Pick a=28 then from Hans Summers
+\ 	a=28 b=1,2,3... d=50 c=500,000 14.0MHz in one Hz steps
+\ 	a=28 b=1,2,3... d=100 c=250,000 7.0MHz in one Hz steps
+\ 	a=28 b=1,2,3... d=50 c=50,000 14.0MHz in 10 Hz steps
+\ 	a=28 b=1,2,3... d=100 c=25,000 7.0MHz in 10 Hz steps 
+\ ****************************************************************************
+\ ----------------------------------------------------------------------------
+\ Set PLL data from Hans Summer, "Notes on Programming the SI5351 Clock Chip"
+\ claculate c with b as integer 1,2,3,..100,1000,10000 setting c=(fout/step)/a
+\ i.e. step = 1.464 Hz for WSPR and a=28 c=14,097,000/1.464)/28 = 343,927
+\ calc (d+e/f)=clk*a/fout d=49 e/f=.660887 (don't do this way see notes below)
+\ e=5603 and f=8478 (see Notes below for different frequency steps) 4/15/23
+\ -----------------------------------------------------------------------------
+\ Different way to Calculate parameters of SI5315	R. D. George May 2023
+\ Calculate a PLL as Actual clock * a where a is chosen to be 1C (28)
+\ Then pick an even integer for d such that PLL/d is close to our disered WSPR feq
+\ Good d's are 80M,200 40M,100 20M,50 10M,25. Calculate c from c=(feq/step)/a
+\ The adjust b to get to WSPR band +1,400 offset (14,095,600 +1,400 =14,097,000)
+\ calculate e=0 f=1 (cause d=even intiger) then SI5351 regs for this WSPR band
+\ Using MSNA_P2=128*b +c(b*128/c) then b+1,b+2,b+3 for registers 5,6,7 (19,20,21)
+\ ---------------------------------------------------------------------------
+: cal_c		( -- )			\ calculate c as (feq/1.464)/a
+	0 pll i> 0 0 dd @ 0 todiv	\ PLL divide by d =  fout (b-0,e=0)
+	drop drop 0 0 10 qlshift	\ feq * 65536 quad result (scale up)	
+	76c9 1 todiv			\ divide by 1.464 * 65536 (1 76c9)
+	drop drop 0 0			\ drop remainder make quad
+	aa @ 0 todiv			\ divide by a as ddouble
+	drop drop			\ just double word
+	0 cc >i				\ save c as double
+;
+: set_PLL	( -- )			\ set the PPL frequency for best result
+	1C aa !				\ set a to 28 1C hex
+	0 m25 i> aa @ xmul drop		\ clock * a if a=28 and clk=25,000,000
+	0 pll >i			\ pll=700,000,000 Default but use actual
+	cal_c				\ claculate c with actual clk * 1C
+	1 0 0 bb >i			\ set b = 1 Default for now
+;
+: band		( -- )			\ get WSPR Band from Feq input
+	fout 2 + @ dup >r		\ high word of frenquency
+	33 38 within if			\ 3.5 MHz
+		c8 dd !			\ set d to c8 (200) integer			
+		then
+	r@ 68 6c within if		\ 7.0MHz
+		64 dd !			\ set d to cb (100) integer				
+		then
+	r@ 96 9b within if		\ 10.0 MHz
+		46 dd !			\ set d to 46 (70) integer				
+		then
+	r@ d4 d9 within if		\ 14.0 MHz
+		32 dd !			\ set d to 32 (50) integer			
+		then
+	r> 1a9 1ae within if		\ 28.0 MHz
+		19 dd !			\ set d to 19 (25) integer				
+		 then
+	set_PLL				\ set PLL as clk*a then calc C
+;
+\ PLL/d is starting freq from actual clock and picking a=1C & d by band call
+\ Need difference to WSPR start freq as initial value for b
+: cal_abcd	( -- )			\ calculate SI5351 parameters
+	band				\ will set a,c,d & PLL call before cal_abcd
+	0 pll i> dd @ 0 todiv		\ divide calculated pll by d
+	drop drop 0 fout i> dswap	\ get fout then swap with pll/d
+	d- 0 0 10 qlshift		\ subtract make Quad then * 65536 (scale up)
+	76c9 1 todiv drop drop		\ divide b offset by 1.464 * 65536
+	0 bb >i				\ store b offset in  Hz
+;
+: cal_ms0p1	( -- )			\ calculate ms0_p1 parameter
+\ ms0_p1 = 128 * d + (128*e/f) - 512	\ 18 bits max this parm
+	0 ee i> 7 dlshift		\ e * 128 double word
+	0 0 0 ff i> todiv		\ make quad and divide by f
+	drop drop			\ result as double
+	200 0 d-			\ subtract 512
+	dd @ 7 lshift 0 d+		\ add d * 128parms
+	0 ms0_p1 >i  			\ save ms0_p1 high low
+;
+: cal_ms0p2	( -- )			\ parameter e (20 bits)
+\ ms0_p2 = 128 * ee - ff*(128*ee/ff)
+	0 ee i> 7 dlshift		\ e * 128 double word
+	2dup >r >r			\ save copy
+	0 0 0 ff i> todiv		\ e * 128 / f
+	drop drop			\ drop remainder
+	0 ff i> dd* drop drop		\ multiply by f
+	r> r> dswap d-			\ get e * 128 and subtract
+	0 ms0_p2 >i			\ save high word then low		
+;
+: cal_ms0p3	( -- )			\ parameter f (20 bits)
+\ ms0_p3 = ff
+	0 ff i> 0 ms0_p3 >i		\ save f as ms0_p3 *	
+;
+: cal_msnap1	( -- )			\ calculate msnA_p1
+\ msna_p1 = 128 * aa + (128 * b/c) - 512
+	0 bb i> 7 dlshift		\ b * 128 double word
+	0 0 0 cc i> todiv		\ make quad and divide by c
+	drop drop			\ make result double		
+	200 0 d-			\ subtract 512
+	aa @ 7 lshift 0 d+		\ add a * 128
+	0 msna_p1 >i			\ save msna_p1 high low
+;
+: cal_msnap2	( -- )			\ calculate msnA_p2
+\ msna_p2 = 128 * bb - cc*(128*bb/cc)
+	0 bb i> 7 dlshift		\ b * 128 double word
+	2dup >r >r			\ save copy
+	0 0 0 cc i> todiv		\ b * 128 / c
+	drop drop			\ drop remainder
+	0 cc i> dd* drop drop		\ multiply by c.
+	r> r> dswap d-			\ get b * 128 and subtract
+	0 msna_p2 >i			\ save high word then low
+;
+: cal_msnap3	( -- )			\ claculate msnA_p3
+\ msna_p3 = cc
+	0 cc i> 0 msna_p3 >i		\ get c	save as msna_p3
+;
+\ ---------------------------------------------------------------------------
+: cal_FMD	( -- )			\ calc Feedback Multisync Dividor regs
+\ register [0,26,1A]			\ msna_p3 (15-8)
+	0 msna_p3 i> ff00 0000 dd&	\ use double word AND with mask 
+	8 drshift drop			\ shift right 8 drop high word
+	reg_x c!			\ register (0)
+\ register [1]				\ msna_p3 (7-0)
+	0 msna_p3 i> 00ff 0000 dd&	\ use double word AND with mask  
+	drop reg_x 1 + c!		\ drop high word save regisrter (1)
+\ register [2]				\ msna_p1 (17-16)
+	0 msna_p1 i> 0000 0003 dd&	\ use double word AND with mask
+	reg_x 2 + c! drop		\ save register drop low word
+\ register [3]				\ msna_p1 (15-8)
+	0 msna_p1 i> ff00 0000 dd&	\ use double word AND with mask
+	8 drshift drop			\ shift right 8 drop high word 
+	reg_x 3 + c!			\ save 8 bit register
+\ register [4]				\ msna_p1 (7-0)
+	0 msna_p1 i> 00ff 0000 dd&	\ use double word AND with mask
+	drop reg_x 4 + c!		\ drop high word and save register
+\ register [5]				\ msna_p3 (19-16) and msna_p2 (19-16)
+	0 msna_p3 i> 0000 000f dd&	\ p3 AND with mask
+	c drshift			\ put high bits p3 high byte
+	0 msna_p2 i> 0000 000f dd&	\ use double word AND with mask
+	10 drshift			\ put hight bits p2 high byte
+	drop swap drop			\ get both high nibbles
+	or reg_x 5 + c!			\ or both for register to save
+\ register [6]				\ msna_p2 (15-8)
+	0 msna_p2 i> ff00 0000 dd&	\ use double word AND with mask
+	8 drshift drop			\ shift 8 right drop high word 
+	reg_x 6 + c!			\ save register
+\ register [7,33,21]			\ msna_p2 (7-0)
+	0 msna_p2 i> 00ff 0000 dd&	\ use double word AND with mask	
+	drop reg_x 7 + c!		\ drop high word save register
+;
+\ -------------------------------------------------------------------------
+: cal_OMD	( -- )			\ calc Ouput Multisync Dividor regs
+\ register [8]				\ ms0_p3 (15-8) ms0_p3 >> 8 & FF
+	0 ms0_p3 i> ff00 0000 dd&	\ use double word AND with mask
+	8 drshift drop 			\ shift 8 and drop high word
+	reg_x 8 + c!			\ register [8]
+\ register [9]				\ ms0_p3 (7-0) ms0_p3 & ff
+	0 ms0_p3 i> 00ff 0000 dd&	\ use double AND with mask
+	drop reg_x 9 + c!		\ drop high word and save register [9]
+\ register [10,44,2c]			\ r0_div, ms0_div and ms0_p1 (17-16)
+	0 ms0_p1 i> 0000 0003 dd&	\ use double word AND with mask
+	reg_x A + c! drop		\ store register [10] drop low word
+\ register [11,45,2d]			\ ms0_p1 (15-8)
+	0 ms0_p1 i> ff00 0000 dd&	\ use double word AND with mask
+	8 drshift drop			\ shift right 8 and drop high word
+	reg_x B + c!			\ save register [11]
+\ register [12,46,2e]			\ ms0_p1 (7-0)
+	0 ms0_p1 i> 00ff 0000 dd&	\ use double word AND with mask
+	drop reg_x C + c!		\ drop high word and save [12]
+\ register [13]				\ ms0_p3 (19-16) and ms0_p2 (19-16)
+	0 ms0_p3 i> 0000 000f dd&	\ p3 AND with mask
+	c drshift			\ put high bits p3 high byte
+	0 ms0_p2 i> 0000 000f dd&	\ use double word AND with mask
+	10 drshift			\ put hight bits p2 high byte
+	drop swap drop			\ get both high nibbles
+	or reg_x D + c!			\ or both for register to save
+\ register [14]				\ ms0_p2 (15-8)
+	0 ms0_p2 i> ff00 0000 dd&	\ use double word AND with mask
+	8 drshift drop			\ shift 8 right drop high word 
+	reg_x E + c!			\ save register
+\ register [15]				\ ms0_p2 (7-0)
+	0 ms0_p2 i> 00ff 0000 dd&	\ use double word AND with mask	
+	drop reg_x F + c!		\ drop high word save register
+;
+\ ---------------------------------------------------------------------------
+: cal_all	( -- )			\ cal all SI5351 registers
+	cal_ms0p1			\ parameter ms0_p1
+	cal_ms0p2			\ parameter ms0_p2
+	cal_ms0p3			\ parameter ms0_p3
+	cal_msnap1			\ parameter msna_p1
+	cal_msnap2			\ parameter msna_p2
+	cal_msnaP3			\ parameters msna_p3
+	cal_fmd				\ set up registers 1A-21 (26-33)
+	cal_omd				\ and registers 2A-31 (42-49)
+;
+: regs		( -- )			\ calculate registers
+	cal_abcd			\ parameters a, b, c, d (set for best results)
+	cal_all				\ claculate rest of SI5351 registers
+;
+: ftest		( -- d )		\ test frequency calkulated
+	0 bb i> 0 m25 i> dd*		\ clk MHz * b
+	0 cc i> todiv drop drop		\ divide by c drop remainder
+	0 pll i> d+ dd @ 0 todiv	\ add to PLL and divide by d
+	drop drop			\ make double
+	.s				\ show result on stack		
+;
+: ftst		( -- d )		\ test frequency with e/f calculated
+	0 bb i> 0 m25 i> dd*		\ clk MHz * b
+	0 cc i> todiv drop drop		\ divide by c drop remainder
+	0 pll i> d+ 0 ff i> dd*		\ add PLL (700,000,000) * f
+	0 ff i> dd @ xmul drop		\ multiply f * d
+	0 ee i> d+ todiv		\ add e then divide into
+	.s				\ double fout and double remainder
+;
+\ Program the SI5351A using I2C with the calculated initial registers
+: init_regs	( -- )			\ initialze regs not calculated
+	twi_i5351			\ initialize I2C on 5351
+	ff 3 twi_w5351			\ reg 3 Disable All
+	10 8 for aft dup 80		\ write 80 hex 
+		swap twi_w5351		\ start at 16 write 80 to each
+		1 + 			\ next register
+	     then next			\ CLK control, power down CLKx
+	00 f twi_w5351			\ PLL input source
+	00 18 twi_W5351			\ CLK3-0 Disable State, unused
+	00 2a twi_w5351			\ Multisynth0, e, f, ms0_p2, ms0_p3
+	01 2b twi_w5351			\ register f default = 1
+	00 2f twi_w5351			\	
+	00 30 twi_w5351			\ register e high byte
+	00 31 twi_w5351			\ register e low byte
+	4f 10 twi_w5351			\ Power up CLK0, PPLA, MS0
+	12 b7 twi_w5351			\ Set referance load 6pf = 12
+	fe 03 twi_w5351			\ Output Enable control, active low
+	drop				\ clean up stack
+;
+\ set registers calculated prior into SI5351 for base frequency
+: set_regs	( -- )			\ Program the real claculated registers
+	1a 8 for aft dup 7 r@ - reg_x +	\ first 8 regs 0 - 7 
+		c@ swap twi_w5351 1 +	\ to addresses 1a - 21
+	     then next drop		\ drop count at end
+	2a 8 for aft dup 7 r@ - reg_x 	\ next 8 regs 8 - 15
+		8 + +			\ loop count + 8
+		c@ swap twi_w5351 1 +	\ to addresses 2a - 31
+	     then next drop		\ drop count at end
+	20 b1 twi_w5351			\ reset PLLA reg 177
+\ reg 177 b1 could be A0 -- reset both PLLA and PLLB
+\ only do PLLA reset once after setting Output MultiSync Divider Regs
+;
+\ -------------------------WSPR----------------------------------------------
+	variable	bstr		\ byte string for WSPR
+	A allot				\ 12 bytes total *.12
+	variable	barry		\ byte array c(0) to c(10)
+	A allot				\ 12 bytes total *.12
+	variable	symbols		\ 162 bytes for final 2 bit symbols
+	a0 allot			\ 162 bytes total
+FLUSH
+\ --------------------- Code for WSPR --------------------------------------
+: bit_rev	( b -- r )		\ bit reversal for 8 bit byte
+	mtmp c!				\ save input byte
+	0 mtmp 1 + c!			\ zero result byte
+	0 dup				\ count
+	begin				\ loop
+	  8 <				\ count to 7 (0--7)
+	  while				\ if true do this
+	    dup 1 swap lshift		\ count to 1,2,4,8,16... 
+	    mtmp c@ and			\ count and with input byte
+		if			\ bit at count?
+	    	  dup 7 swap -  	\ 8 - count for lshift
+	    	  1 swap lshift  	\ left shift bit by count
+	    	  mtmp 1 + c@ or  	\ add with previous result
+	    	  mtmp 1 + c!		\ save result
+		then			\ if bit zero do nothing 
+	    1 + dup			\ add one to loop count
+	repeat				\ loop
+	drop				\ drop loop count
+	mtmp 1 + c@			\ result on stack
+;
+: input_wspr	( -- )			\ input WSPR 12 bytes of data
+\	KI5HBOEM0020			\ for Robert
+\ Call sign padded with spaces to 6 characters, leading or trailing
+\ 4 character Location, and two digit dBm
+	." Input the 12 character WSPR string - No spaces " cr
+	0 10 for aft dup 700 + 		\ clear 16 bytes at RAM 700
+		0 swap c! 1 +		\ in the terminal input buffer
+		then next		\ starting at RAM 700
+	     drop			\ clear count
+	query cr			\ wait for character input
+	700 bstr C cmove		\ move input to bstr byte array
+	0 10 for aft dup 700 + 		\ clear 16 bytes at RAM 700 WHY?
+		0 swap c! 1 +		\ in the terminal input buffer
+		then next		\ starting at RAM 700
+	     drop			\ clear count
+; 
+\ Pick value for coding call ASCII and rules for WSPR code. No error checking
+: value50	( ascii -- n )		\ ASCII to integer for packing
+	>r r@				\ save input ASCII to return stack
+	20 = if				\ was it a space?
+		24			\ value is 24 Hex = 36 Decimal
+	     else r@ 30 39 within	\ digits
+	     if				\ is it a digit?
+		r@ 30 -			\ return 0 to 9
+	     else r@ 41 5A within	\ letters
+	     if				\ is it a cap letter?
+		r@ 37 -			\ return A to 23 (10 - 35)
+	     then then then		\ 3 IF's
+	r> drop				\ clear return stack
+;
+\ Pack coded 12 character array into 2 integers, truncate and combine to 50
+\ bits in a quad word 64 bits		R D George 2/28/23
+: call50	( add -- d )		\ add=address of byte array
+	>r 0 0  r@ 0 + c@ 		\ save address and get first char
+	value50 0  d+			\ add in first code to double word N1
+	24 xmul drop 			\ N2=N1*36+chr(2)
+	r@ 1 + c@ value50		\ get next byte code
+	0 d+				\ add char code to double
+	A xmul drop			\ N3=N2*10+chr(3)
+	r@ 2 + c@ value50		\ get next byte code
+	0 d+				\ add to sum
+	1B xmul drop			\ N4=N3*27+chr(4)-10
+	r@ 3 + c@ value50		\ get next byte code
+	0 d+ A 0 d-			\ add to sum and -10
+	1B xmul drop			\ N5=N4*27+chr(5)-10
+	r@ 4 + c@ value50		\ get next byte code
+	0 d+ A 0 d-			\ add to sum and -10
+	1B xmul drop			\ N6=N5*27+chr(6)-10
+	r@ 5 + c@ value50		\ get next byte code
+	0 d+ A 0 d-			\ add to sum and -10
+	r> drop				\ clean up return stack
+;
+\ pack coded location (4 chars) and dbm (2 chars)
+\ double = (B3 - A*Loc(1) - Loc(3))*180 + A*Loc(2) + Loc(4)
+: loc50		( add -- d )		\ address of WSPR array
+	>r B3 0 r@ 6 + c@		\ save address get 179 and Loc(1)
+	41 - 0 A xmul drop d-		\ char(0-9) make double * 10 subtract
+	r@ 8 + c@ 30 - 0 d-		\ get char Loc(3) sumbtract 10 *
+	b4 xmul drop			\ difference times 180
+	r@ 7 + c@ 41 -			\ Loc(2) code
+	0 A xmul drop d+		\ add Loc(2)*10
+	r@ 9 + c@ 30 -			\ Loc(4) number
+	0 d+				\ add to sum
+\ Now add in the dbm power double above *128 + Pwr + 64
+\ Pwr is ingteger 0 to 60 chr(11) chr(12)
+	7 dlshift			\ integer sum*128
+	r@ A + c@ 30 - A *		\ chr(11)*10
+	r@ B + c@ 30 - +		\ add chr(12)
+	40 + 0 d+			\ add 64, add to sum
+	r> drop				\ clean up return stack
+;
+\ Packing to doubles to 50 bits then create 11 8-bit bytes c(0) to c(A)
+: 8bit		( addr -- )		\ address of input ASCII string
+	dup >r call50			\ save address, get N double integer
+	0 0 16 qlshift			\ make quad and left shift 22 bits
+	r> loc50			\ get address, get M integer
+	0 0 q+	 			\ get M make quad add to shifted N	
+	.s cr				\ should be 50 bits quad word right just.
+	E qlshift			\ shift MSB 14 bits to top of quad
+	dup 00ff and barry 1 + c!	\ MSB to array c(1)
+	8 rshift barry 0 + c!		\ Next MSB to array c(0)
+	dup 00ff and barry 3 + c!	\ MSB to array c(3)
+	8 rshift barry 2 + c!		\ Next MSB to array c(2)
+	dup 00ff and barry 5 + c!	\ MSB to array c(5)fec
+	8 rshift barry 4 + c!		\ Next MSB to array c(4)
+	dup 00ff and barry 7 + c!	\ MSB to array c(7)
+	8 rshift barry 6 + c!		\ Next MSB to array c(6)
+	0 barry 8 + c!			\ zero bytes (8)
+	0 barry 9 + c!			\ c(9)fec
+	0 barry A + c!			\ and c(10)
+;
+\ Calculate 32 bit parity bit with byte LSB XOR with each bit in 32 bit double
+: parity	( reg -- bit0 )		\ parity bit 0 in stack word
+	\ mtmp 0 + is RegTmp	0 mtmp i> 0 mtmp >i	load / save
+	\ mtmp 4 + is Reg0	1 mtmp i> 1 mtmp >i	load / save
+	\ mtmp 8 + is Reg1	2 mtmp i> 2 mtmp >i	load / save
+	>r r@ 0 =			\ reg = 0 or 1 on return stack
+	if				\ reg0 ?
+	  1 mtmp i> 5351 F2D0   	\ Register0 and F2D05351 double word
+	  dd& 0 mtmp >i		 	\ save RegTmp high low *
+          0 32 for aft mtmp @		\ RegTmp Low
+		0001 and xor 		\ and with 01 xor with previous bit
+		0 mtmp i>		\ 32 bit RegTmp to right shift
+		1 drshift		\ right shift by 1 bit 
+		0 mtmp >i		\ resave RegTmp high low *
+		then next		\ end for loop
+	else r@ 1 = if			\ Reg1 ?
+	  2 mtmp i> 3C47 E461 		\ Register1 and E4613C47 double word
+	  dd& 0 mtmp >i			\ save RegTmp high low *
+	  0 32 for aft mtmp @		\ RegTmp Low
+		0001 and xor		\ and with 01 xor with previous bit
+		0 mtmp i>		\ 32 bit RegTmp to right shift
+		1 drshift		\ right shift 1 bit
+		0 mtmp >i		\ save RegTmp high low *
+                then next		\ end for loop
+	then then  			\ result on stack
+	r> drop				\ drop reg number
+;
+\ Generate bit for 162 bit array from Reg0 and Reg1 Array count is 1/2 of first
+\ array element. i.e. 40 = 80 an 81 elements from Reg0 and Reg1
+: BitGen	( c -- c )		\ array count 1/2 of adderess
+	dup >r				\ save count on return stack
+	2 * 0 parity			\ get Reg0 parity bit and 2*count
+	swap symbols + c!		\ store in Symbols array
+	r@ 2 * 1 + 1 parity		\ get Reg1 parity bit and 2* count + 1
+	swap symbols + c!		\ store in symbols array +1
+	r>				\ put count back on stack
+; 
+\ Foward Error Correction Convolution Encoding rate=1/2 length=32
+\ After packing call sign, Location and dBm in c(0)-c(10)
+: fec		( -- )			\ FEC of bytes at Symbol count*2 and count*2 +1
+	\ RegTmp is mtmp (32 bits) Temporary register
+	\ Reg0 is mtmp+4 (32 bits) Reg1 is mtmp+8 (32 bits)
+	\ 162 bit array is symbols (low 4 bits 0-3) for FEC bits
+	\ use the 162 byte array for all the Symbol code processes
+	0 0 0 mtmp >i			\ zero RegTmp first double
+	0 0 1 mtmp >i			\ zero Reg0 second double
+	0 0 2 mtmp >i			\ zero Reg1 third double
+	0				\ count (1/2) for Symbols array
+	B for aft r@ invert B +		\ index for 11 bytes c(0) to c(10) barry
+	  barry + c@			\ get byte on stack from barry + index
+	  8 for aft r@ invert 8 + 	\ index for 8 bits in byte 0 to 7 MSB first
+	    2dup rot drop lshift  	\ byte, twice index once left shift by index 
+	    80 and 80 = if		\ and 80 check MSB after left shift by index
+		1			\ yes bit set
+		else			\ else
+		0			\ no bit not set
+		then			\ end of if
+	        dup			\ make copy of bit
+	    0 1 mtmp i> 1 dlshift d+ 	\ make double left shift Reg0 and add bit 
+	    1 mtmp >i			\ save new Reg0 second double
+	    0 2 mtmp i> 1 dlshift d+ 	\ make double left shift Reg1 and add bit
+	    2 mtmp >i			\ save new Reg1 third double
+	    swap BitGen 1 + swap	\ array count to Parity bit generation then +1
+	  then next
+	  drop				\ remove temp
+	then next
+	drop				\ clean up stack
+;
+\ Symbol array is 162 1's and 0's from Foward Error Correction
+\ Interleave byte array according to WSPR standard and place result in
+\ the upper nibble of the Symbol array for later Sync bit calculations
+: interleave	( -- ) 			\ cycle through 255 bit reversed bytes
+	0 begin				\ I count 0 to `161
+	ff for aft r@ invert ff + 	\ J loop 0 to 255
+	  bit_rev dup	    		\ bit reverse loop count
+	  A2 < if			\ value less that 162?
+	    swap dup symbols + c@	\ get byte at I loop count
+	    1 + 4 lshift		\ add 1 and shift bit(I) to high nibble
+	    rot dup symbols + c@	\ rotate J cnt to top add address get byte there
+	    rot or swap symbols + c!	\ rotate that byte OR with previous and save
+	    1 +				\ increment I count
+	    else			\ else
+	      drop 			\ drop bit reversed count
+	    then			\ end if
+	  dup A2 = if			\ I count = 162 set for J loop count to 0
+	      r> drop 0 >r		\ get loop count then set to 0 on return stack
+	      then			\ end if can exit for loop then exit begin
+	  then next			\ end of for  J loop
+	dup A2 = until			\ exit I loop if stack count = 162
+	drop				\ clean up stack
+;
+\ Sync byte, combine 162 data points with sync bits with good auto-correlation properties
+\ will process sync bits 16 bits at a time to save RAM. Reuse Symbols array again.
+\	1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0	C08E
+\	0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0	25E0
+\	0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0	2502
+\	1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0	9A1A
+\	0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1	1AA9
+\	0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0	2C6A
+\	0 ,0, 1, 0, 0, 0, 0, 0, 1, 0 ,0, 1, 0, 0, 1, 1	2093
+\	1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1	B347	
+\	0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0	0530
+\	0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0	1AC6
+\	0, 0						0000
+\ 10 16 bit integers and one 2 bit
+\ Sync output is 2 * Symbols value + Sync bit. Symbol of 20 or 21 is 1 else is 0
+\ Symbols array contains values of 21,11,10,20 after interveale pass through array
+\ Generate Symbols ( 0 - 3 ) in Symbols array from count and 16 bit binary
+: sym16		( c,16bit -- c )	\ current count and bit array
+	swaP >r				\ count to return stack
+	0 begin				\ loop 16 times through binary 16 bits
+	  dup rot dup rot lshift	\ copy 16B lshift count times
+	  8000 and F rshift		\ count 16B and Sync bit MSB first
+	  rot dup r@ + symbols +	\ get current symbols value
+	  c@ 20 - 0< if			\ 20 or 21 = a ONE
+		0			\ less than 0 true = 0
+		else			\ else
+		1			\ false = 1
+		then			\ end if
+	  2 * rot + swap dup rot swap	\ 2 time value + Sync bit
+	  r@ + symbols + c!		\ save symbol value (0-3)
+	  1 + dup 10 =			\ add one and check for 16
+	until				\ loop test
+	drop drop			\ cleanup stack
+	r> 10 +				\ add 16 to overall count
+;
+\ replace bit values in Symbols array with Sync output calculation
+: sync_out	( sym -- sym )		\ replace Interleaved values with output Symbols
+	0				\ Symbol count 0 to 161
+	C08E sym16			\ first 16 sync bits	16
+	25E0 sym16			\ second 16 sync bits	32
+	2502 sym16			\ third 16 sync bits	48
+	9A1A sym16			\ fourth 16 sync bits	64
+	1AA9 sym16			\ fifth 16 sync bits	80
+	2C6A sym16			\ sixth 16 sync bits	96
+	2093 sym16			\ seventh 16 sync bits	112
+	B347 sym16			\ eighth 16 sync bits	128
+	0530 sym16			\ ninth 16 sync bits	144
+	1AC6 sym16			\ tenth 16 syns bits	160
+	0000 sym16			\ need 162 symbols but this will overrun by 14
+	ndrop				\ clean up stack
+;
+\ Timer delay loop - WSPR 683 millisecond timer beeps when done
+: sym_time	( n -- )		\ loop for n WSPR symbols time
+	for	  			\ 2B1 is 683 millseconds
+	  2B1 ms			\ ms = 1 millisecond, note: no AFT
+	next				\ 683 millsecons loop	
+	." *"				\ show astrick
+;
+\ delay after symbols transmitted, S/B 9400 milliseconds but routine was modifed
+\ to use a stored delay count to adjust for the time used by each frequency
+\ setting routine (80M, 40M, 30M, 20M & 10M)	R D George May 2023 
+: delay_9400	( n -- )		\ delay n 9400 milliseconds
+	for	  			\ 24B8 is 9400 milliseconds
+\	  24B8 ms			\ ms = 1 millisecond, note: no AFT
+	  del_cnt @ ms			\ get delay count from RAM *.12
+	next				\ ~9.40 seconds delay
+	." = 2min "			\ msg for WSPR trnasmitting
+;
+: dell		( n-- )			\ delay test n times ~ 9 seconds *.12
+	for aft
+	  del_cnt @ ms
+	then next
+;
+\ ************************************************************************
+\ WSPR transmitt code and varaiables	4/14/23		R D George
+\ Basic test will set b + 32 hex ( if 14.097,000 then 14.097,073.2 )
+\ then pre-calculate SI5351 regs 1F,20,21 (i.e.  5,6,7 ) for each step up from
+\ the WSPR set (with b=b+50). MSNA_P2 = b * 128 - c*(b*128/c)
+\ for b=b+32 cal_msnap2, cal_FMD store regs 5,6,7 19,20,21 for symbol code 0
+\ for b=b+33 cal_msnap2, cal_FMD store regs 5,6,7 19,20,21 for symbol code 1
+\ for b=b+34 cal_msnap2, cal_FMD store regs 5,6,7 19,20,21 for symbol code 2
+\ for b=b+35 cal_msnap2, cal_FMD store regs 5,6,7 19,20,21 for symbol code 3
+\ Set up SI5351 registers for our selected WSPR frenquency 14.097,073.2 and
+\ then on even minute change registers 5,6,7 transmitt for 683 millseconds
+\ next symbol code till all 162 transmitted.
+\ **********************************************************************
+variable	r5			\ create r5 variable 0 - 3
+	2 allot				\ 4 bytes for 4 values
+variable	r6			\ create r5 variable 0 - 3
+	2 allot				\ 4 bytes for 4 values
+variable	r7			\ create r5 variable 0 - 3
+	2 allot				\ 4 bytes for 4 values
+\ C (12) bytes as a 3 by 4 array 3 registers for 4 symbols
+\ **********************************************************************
+\ Sets a 4 by 3 array of registers (5,6,7 - 1F,20,21) using b parameter by adding
+\ off set of 32 plus count 0 - 3, calculating needed registers then returning b
+: sym_set	( -- )			\ Set values of regs for WSPR symbols
+	4 for aft 0 bb i>	 	\ get b as double
+	  r@ invert 4 + 32 +		\ loop counter 0 to 3 + 32 hex
+	  0 d+ 0 bb >i			\ make 32 double add to b and save
+	  cal_msnap2 cal_FMD		\ get new values for registers
+	  0 bb i> 			\ after regs calc get new b and return it
+	  r@ invert 4 + 32 + 0		\ get count as double
+	  d- 0 bb >i			\ subtract count from new and save as b		
+	  r@ invert 4 + 		\ loop count start with 0 to 3
+	  dup reg_x 5 + c@ swap		\ count reg(1F) count decimal 31
+	  r5 + c!			\ index into r5 array and store 
+	  dup reg_x 6 + c@ swap		\ count reg(20) count decimal 32
+	  r6 + c!			\ index into r5 array and store 
+	  reg_x 7 + c@ swap		\ count reg(21) count decimal 33
+	  r7 + c!			\ index into r5 array and store
+	then next
+;
+: pwr_up	( -- )			\ power up SI5351
+	4F 10 twi_w5351			\ Power up CLK0, PPLA, MS0
+	FE 03 twi_w5351			\ Output Enable control, active low
+;
+: pwr_down	( -- )			\ power down SI5351
+	80 10 twi_w5351			\ Power down CLK0, PPLA, MS0
+	FF 03 twi_w5351			\ Output Disable control, active high
+;
+: send_msg	( -- )			\ send the WSPR message code sequence
+	pwr_up				\ ready to set frequency
+	cr ." Trnasmitting"
+	  A2 for aft r@ invert A2 +	\ loop through sysmol code array
+	    symbols + c@		\ get code byte
+	    dup 3 = if			\ is it 3?
+	      r5 3 + c@ 1F twi_w5351	\ reg 5 symbol 3
+	      r6 3 + c@ 20 twi_w5351	\ reg 6 symbol 3
+	      r7 3 + c@ 21 twi_w5351	\ reg 7 symbol 3
+	      drop
+	    else
+	    dup 2 = if			\ is it 2?
+	      r5 2 + c@ 1F twi_w5351	\ reg 5 symbol 2
+	      r6 2 + c@ 20 twi_w5351	\ reg 6 symbol 2
+	      r7 2 + c@ 21 twi_w5351	\ reg 7 symbol 2
+	      drop
+	    else
+	    dup 1 = if			\ is it 1?
+	      r5 1 + c@ 1F twi_w5351	\ reg 5 symbol 1
+	      r6 1 + c@ 20 twi_w5351	\ reg 6 symbol 1
+	      r7 1 + c@ 21 twi_w5351	\ reg 7 symbol 1
+	      drop
+	    else
+	    0 = if			\ is it 0?
+	      r5 0 + c@ 1F twi_w5351	\ reg 5 symbol 0
+	      r6 0 + c@ 20 twi_w5351	\ reg 6 symbol 0
+	      r7 0 + c@ 21 twi_w5351	\ reg 7 symbol 0
+	    then then then then
+	    0 sym_time			\ delay 683 miliseconds
+	  then next			\ end for loop for 162
+	  pwr_down			\ disable frequency generation
+	  0 delay_9400			\ delay till full 2 minutes *.11			
+;
+\ DUMP utility to print memory                WFR 2011-01-03 
+\ Begin by specifying target memory: flash, ram, eeprom
+\ Call dump with starting address and byte count as DECIMAL
+\ A second routine for dumping EEPROM attached to the I2C buss
+\ dump                 WFR 2011-01-27
+\ Modified for 328eForth, 23mar11cht
+\ Extend eForth first, 22mar11cht
+: DOES R> LAST @ NAME> 2+ I! ; 
+\ specific for subroutine thread code.
+: VALUE ( n --, interpret ) VARIABLE DP @ 2- ! DOES R> 2* I@ @ ;
+\ compile a pointer in flash, access data in RAM
+: [TO] ( n --, interpret ) ' 4 + I@ ! ; 
+\ change value while interpreting
+: to ( n --, compile ) R> DUP   1+ 2* I@   2+ 2* I@   SWAP 2+ >R   ! ;
+\ compiled in colon word to change value at run time
+decimal
+FLUSH
+1 value target  ( 0=flash, 1=ram)  
+: flash 0 to target ;
+: ram   1 to target ;
+: smartC@  ( addr --- cell-contents )
+     target if C@ else iC@ then ;
+\ First defination of ?legal Decimal numbers used here
+: ?legal ( char --- printable_char from low 8 bits )
+   255 and   32 over > over 127 > or   if drop $2E ( . ) then ; 
+
+: .location ( --- print memory bank being accessed)
+   target if ."  ram " else ."  flash " then ;
+
+: .alpha ( addr count --- print 8 cells or 16 bytes as ascii characters)
+   for aft dup smartC@ ?legal emit 1+ then next drop ;
+
+: .memory ( addr count --- flash prints cells; r/r prints bytes)
+   for aft dup smartC@ 3 u.r 1+ then next drop ;
+
+: dump ( addr count ---  form: 1234 xx xx xx xx xx abcdefg)
+   .location cr   base @ >r   hex  16 /
+   for aft dup 5 u.r space dup 
+   16 .memory space dup 16 .alpha cr
+   16 + then next drop r> base !  ;
+\ end of dump utility
+HEX
+\ Band jump between each WSPR message 40 30 20 - Test routine
+\ Setup SI5351 (init_regs, pwr_down, set_regs)
+: wspr_cal	( -- )			\ calculate registers, send msg
+	regs				\ claculate all reg values
+	set_regs			\ set registers in SI5351
+	sym_set				\ set up 3by4 array (3 regs by 4 symbols)
+	send_msg			\ transmitt symbols for WSPR
+;
+: 80m		( -- )			\ 80M band
+	  7950 36 0 fout >i		\ set feq for 80 meter + 1400
+	  wspr_cal			\ start WSPR
+;
+: 40m		( -- )			\ 40M band
+	  6c00 6b 0 fout >i		\ set feq for 40 meter + 1400
+	  wspr_cal			\ start WSPR
+;
+: 30m		( -- )			\ 30M band
+	  b9c4 9a 0 fout >i		\ set feq for 30 meter + 1400	
+	  wspr_cal			\ start WSPRfout
+;
+: 20m		( -- )			\ 20M band
+	  1a68 d7 0 fout >i		\ set feq for 20 mwter + 1400
+	  wspr_cal			\ start WSPR
+;
+: 10m		( -- )			\ 10M band
+	  2b30 1ad 0 fout >i		\ set feq for 10 meter + 1400
+	  wspr_cal			\ start WSPR
+;
+: band_jmp	( n -- )		\ band switch for n times
+	for aft				\ loop
+	80m				\ 80 Meter band
+	40m				\ 40 Meter band
+	30m				\ 30 Meter band
+	20m				\ 20 Meter band
+	10m				\ 10 Meter band
+	then next
+;
+: 3band_jmp	( n -- )		\ band switch for n times
+	for aft				\ loop
+	20m				\ 20 Meter band
+	30m				\ 30 Meter band
+	40m				\ 40 Meter band
+	then next
+;
+: wspr_tran20	( n -- )		\ WSPR Tranmission n * 20 at 50%
+	for aft 20m			\ loop 2 minute trans 14.097073
+	d dell				\ delay ~ 120 seconds
+	then next
+;
+: wspr_tran40	( n -- )		\ WSPR Tranmission n * 40 at 50%
+	for aft 40m			\ loop 2 minute trans 7.040070
+	d dell				\ delay ~ 120 seconds
+	then next
+;
+Flush
+save_state cr
+." ******************* Load Finished ****************" cr
